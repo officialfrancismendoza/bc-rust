@@ -15,6 +15,7 @@
 #![forbid(missing_docs)]
 
 pub mod hash;
+pub mod hazmat;
 pub mod kdf;
 pub mod kem;
 pub mod mac;

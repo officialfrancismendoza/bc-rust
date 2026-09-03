@@ -1,5 +1,7 @@
 //! Provides simplified abstracted APIs over classes of cryptographic primitives, such as Hash, KDF, etc.
 
+pub mod hazmat;
+
 use crate::errors::*;
 use crate::key_material::KeyMaterialTrait;
 use core::fmt::{Debug, Display};
