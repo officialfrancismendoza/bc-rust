@@ -1,29 +1,34 @@
-//! XTS, the XEX-based tweaked-codebook mode with ciphertext stealing, as IEEE Std 1619-2007
-//! specifies it for AES and NIST SP 800-38E approves it, over any 128-bit block permutation.
+//! XTS, the "XEX Tweakable Block Cipher with Ciphertext Stealing" (SP 800-38E Sec 3), as IEEE Std
+//! 1619-2007 Sec 5 specifies it for AES and NIST SP 800-38E approves it, over any 128-bit block
+//! permutation.
 //!
 //! XTS encrypts one *data unit* -- a disk sector, say -- under a key and a 128-bit *tweak* that
 //! names the data unit's position, and the ciphertext is exactly as long as the plaintext: there
-//! is no IV, no nonce, no padding and no tag. A data unit is at least one block, 16 bytes, and at
-//! most 2^20 blocks, 16 MiB, the limit SP 800-38E Sec 4 adds to IEEE 1619: "The length of the data
-//! unit for any instance of an implementation of XTS-AES shall not exceed 2^20 AES blocks". A data
-//! unit that is not a whole number of blocks is encrypted with ciphertext stealing, so its
-//! ciphertext is as long as it is.
+//! is no IV, no nonce, no padding and no tag. A data unit is at least one block, 16 bytes
+//! (IEEE 1619-2007 Sec 5.1), and at most 2^20 blocks, 16 MiB, a limit that Sec 5.1 recommends and
+//! SP 800-38E Sec 4 requires: "The length of the data unit for any instance of an implementation
+//! of XTS-AES shall not exceed 2^20 AES blocks". A data unit that is not a whole number of blocks
+//! is encrypted with ciphertext stealing, so its ciphertext is as long as it is. IEEE 1619
+//! measures a data unit in bits; this implementation takes whole bytes, a restriction that
+//! SP 800-38E Sec 4 allows an implementation to make.
 //!
-//! The key is [`XTSKey`], built with `from_key_material` from the XTS key `Key = Key_1 | Key_2`:
-//! two keys for the permutation, `Key_1` encrypting the data and `Key_2` the tweak, so 32 bytes
-//! over a permutation with a 16-byte key and 64 over one with a 32-byte key. The data-unit length
-//! is the key type's `DATA_UNIT_LEN`, because SP 800-38E Sec 4 defines an instance of XTS-AES by
-//! "a secret key" and "a single, fixed length for the data units that the key protects"; a length
-//! outside the range is a compile error. The ready-made `XTS_AES_128` / `XTS_AES_256` aliases are
-//! in `bouncycastle-aes`. IEEE 1619 specifies XTS for AES only, and AES is the only cipher
-//! SP 800-38E approves it for.
+//! The key is [`XTSKey`], built with `from_key_material` from the XTS key `Key = Key_1 | Key_2`
+//! (IEEE 1619-2007 Sec 5.3.1): two keys for the permutation, `Key_1` encrypting the data and
+//! `Key_2` the tweak, so 32 bytes over a permutation with a 16-byte key and 64 over one with a
+//! 32-byte key, the 256- and 512-bit keys of XTS-AES-128 and XTS-AES-256 (Sec 6). The data-unit
+//! length is the key type's `DATA_UNIT_LEN`, because SP 800-38E Sec 4 defines an instance of
+//! XTS-AES by "a secret key" and "a single, fixed length for the data units that the key
+//! protects"; a length outside the range is a compile error. The ready-made `XTS_AES_128` /
+//! `XTS_AES_256` aliases are in `bouncycastle-aes`. IEEE 1619 specifies XTS for AES only, and AES
+//! is the only cipher SP 800-38E approves it for.
 //!
 //! # The tweak
 //!
-//! The tweak is the 128-bit value `i` that the mode encrypts under `Key_2`, taken as given. For
-//! storage it is the data unit's sequence number as a 128-bit little-endian integer,
-//! `u128::to_le_bytes(n)`, the encoding of NIST's ACVP sequence-number vectors (sequence number
-//! 255 is the tweak `FF 00 .. 00`).
+//! The tweak value `i` is the data unit's position, a non-negative integer; the data units under
+//! a key take consecutive values from any first one, typically the logical block address of the
+//! first sector (IEEE 1619-2007 Sec 5.1, Sec 6). The methods take `i` as the 16 bytes that are
+//! encrypted under `Key_2`, which Sec 5.1 makes its little-endian encoding: `i.to_le_bytes()` for
+//! a `u128` `i`, so sector 255's tweak is `FF 00 .. 00`.
 //!
 //! # Usage Examples
 //!
@@ -57,13 +62,14 @@
 //!
 //! ## XTS provides confidentiality only
 //!
-//! SP 800-38E: "The mode does not provide authentication of the data or its source." A changed
-//! ciphertext block decrypts to an unpredictable plaintext block rather than to an error, and an
-//! older ciphertext of a data unit decrypts to the older plaintext. Each 16-byte block is
+//! SP 800-38E's abstract: "The mode does not provide authentication of the data or its source." A
+//! changed ciphertext block decrypts to an unpredictable plaintext block rather than to an error,
+//! and an older ciphertext of a data unit decrypts to the older plaintext. Each 16-byte block is
 //! encrypted on its own under its position's mask, so someone who sees two versions of a data
 //! unit learns which of its blocks changed, and the same plaintext under the same key and tweak
-//! always gives the same ciphertext. Where any of that matters, authenticate the data, or use an
-//! AEAD, which a format that can store a nonce and a tag should.
+//! always gives the same ciphertext; IEEE 1619-2007 Annex D.2 and D.3 discuss these limits. Where
+//! any of that matters, authenticate the data, or use an AEAD, which a format that can store a
+//! nonce and a tag should.
 //!
 //! ## XTS is for storage
 //!
@@ -71,12 +77,23 @@
 //! encryption of data in transit", and FIPS 140-3 IG C.I: "AES-XTS is only approved for storage
 //! purposes."
 //!
-//! ## One tweak per data unit
+//! ## One key scope per key
 //!
-//! The tweak is what makes the encryption of each data unit differ. Two data units encrypted
-//! under one key and one tweak are encrypted under the same masks, so a block that is equal in
-//! both, at the same offset, has an equal ciphertext in both. Give every data unit under a key its
-//! own tweak, its sequence number.
+//! IEEE 1619-2007 Sec 6 allows a key only one *key scope*: a run of data units of one length
+//! under consecutive tweak values, so every data unit under the key has its own tweak. Two data
+//! units encrypted under one key and one tweak are encrypted under the same masks, so a block that
+//! is equal in both, at the same offset, has an equal ciphertext in both, and a ciphertext block
+//! of one can be pasted into the other. A key type keeps to one length, its `DATA_UNIT_LEN`; a
+//! second key type of another length made from the same material, or a second disk under the
+//! same key, steps outside the key scope.
+//!
+//! ## A bounded amount of data per key
+//!
+//! The proof that IEEE 1619-2007 Annex D.4.3 (informative) cites gives a strong guarantee while a
+//! key encrypts not much more than a terabyte, 2^36 blocks, and a weakening one beyond it; Annex
+//! D.6 warns that a few hundred terabytes under one key make attacks possible. The bound comes
+//! from the 128-bit block, so a longer key does not raise it. Nothing here counts the blocks a key
+//! has encrypted.
 //!
 //! ## `Key_1` and `Key_2` must be independent
 //!
@@ -85,12 +102,6 @@
 //! falls to a chosen-ciphertext attack. The key's constructor refuses equal halves, and one of
 //! all zeros, but it cannot check independence. Draw the whole key from an RNG, with
 //! `FromKeyMaterial::generate`, rather than deriving one half from the other.
-//!
-//! ## One data-unit length per key
-//!
-//! An instance of XTS-AES has "a single, fixed length for the data units that the key protects"
-//! (SP 800-38E Sec 4), which a key type, with its `DATA_UNIT_LEN`, keeps to. Constructing a
-//! second key type of another length from the same material steps outside it.
 
 use crate::{Decrypting, Encrypting};
 use bouncycastle_core::errors::{KeyMaterialError, SymmetricCipherError};
@@ -112,7 +123,7 @@ type Block = [u8; BLOCK_LEN];
 /// The length of the tweak, in bytes: the 128-bit tweak value `i`.
 pub const XTS_TWEAK_LEN: usize = 16;
 
-/// The shortest data unit, in bytes: one block.
+/// The shortest data unit, in bytes: one block, 128 bits (IEEE 1619-2007 Sec 5.1).
 pub const XTS_MIN_DATA_UNIT_LEN: usize = BLOCK_LEN;
 
 /// The longest data unit, in bytes: 2^20 blocks, 16 MiB (SP 800-38E Sec 4).
@@ -199,7 +210,7 @@ impl<P, const DATA_UNIT_LEN: usize> XTSKey<P, DATA_UNIT_LEN> {
     /// below are never handed a data unit outside them.
     const DATA_UNIT_LEN_CHECK: () = assert!(
         DATA_UNIT_LEN >= XTS_MIN_DATA_UNIT_LEN && DATA_UNIT_LEN <= XTS_MAX_DATA_UNIT_LEN,
-        "an XTS data unit is from one block to 2^20 blocks (SP 800-38E Sec 4)"
+        "an XTS data unit is 1 to 2^20 blocks (IEEE 1619-2007 Sec 5.1, SP 800-38E Sec 4)"
     );
 }
 
@@ -288,8 +299,7 @@ where
         return Err(KeyMaterialError::InvalidLength.into());
     }
 
-    // FIPS 140-3 IG C.I: "Key is then parsed as the concatenation of two AES keys, denoted by
-    // Key_1 and Key_2".
+    // Key = Key_1 | Key_2, two halves of equal size (IEEE 1619-2007 Sec 5.3.1).
     let (key1, key2) = key.ref_to_bytes().split_at(HALF);
 
     // FIPS 140-3 IG C.I: "The module shall check explicitly that Key_1 ≠ Key_2, regardless of how
@@ -322,13 +332,13 @@ fn half<const HALF: usize>(
     Ok(half)
 }
 
-// The algorithm. IEEE 1619-2007 itself was not to hand when this was written; the conventions
-// below -- the order of the key halves, the byte order of the multiplication by α, and the order
-// of the two blocks that ciphertext stealing produces -- are those of NIST's ACVP reference
-// implementation of XTS-AES, and the NIST ACVP and Wycheproof vectors in `bouncycastle-aes` pin
-// every one of them. The procedure names are SP 800-38E's: XTS-AES-blockEnc and -blockDec on one
-// block, XTS-AES-Enc and -Dec on a data unit. The step numbers in the comments are the ones that
-// reference implementation gives the steps of XTS-AES-blockEnc and -blockDec.
+// The algorithm is IEEE 1619-2007 Sec 5, and the comments use its procedure names and step
+// numbers: XTS-AES-blockEnc (Sec 5.3.1) and -blockDec (Sec 5.4.1) on one block, XTS-AES-Enc
+// (Sec 5.3.2) and -Dec (Sec 5.4.2) on a data unit, and the multiplication by α (Sec 5.2). Sec
+// 5.4.2 letters the sub-steps of its steps 3 and 4 continuously, b) to h), and the comments keep
+// those letters. The NIST ACVP and Wycheproof vectors in `bouncycastle-aes` pin the conventions
+// that interoperability rests on: the order of the key halves, the byte order of the tweak and of
+// the multiplication by α, and the order of the two blocks that ciphertext stealing produces.
 
 /// Step 3 of XTS-AES-blockEnc and XTS-AES-blockDec, the only step in which the two directions
 /// differ: the forward cipher under `Key_1` when encrypting, the inverse when decrypting. The
@@ -367,19 +377,22 @@ impl<P: BlockPermutation<BLOCK_LEN>> CipherStep<P> for Decrypting {
     }
 }
 
-/// `T ⊗ α`: multiplication by the primitive element α = x of GF(2^128), modulo
-/// x^128 + x^7 + x^2 + x + 1, with the block read as a little-endian polynomial -- byte 0 holds
-/// the coefficients of x^0..x^7 (bit k of the byte for x^k), byte 15 those of x^120..x^127.
+/// `T ⊗ α` (IEEE 1619-2007 Sec 5.2): multiplication by the primitive element α = x of GF(2^128),
+/// modulo x^128 + x^7 + x^2 + x + 1 (Sec 4.2). Byte 0 is the first byte of the AES block, and
+/// bit k of byte j is the coefficient of x^(8j + k).
 ///
-/// That is a one-bit shift towards the top across the bytes, from byte 0 up; when the bit
-/// shifted out of byte 15, the coefficient of x^127, is set, x^128 reduces to x^7 + x^2 + x + 1
-/// and 0x87 is XORed into byte 0. The reduction is selected with a mask rather than a branch,
-/// since `T` is secret (it is the tweak encrypted under `Key_2`), as CMAC's doubling does.
+/// Sec 5.2's recurrence is a one-bit shift towards the top across the bytes, from byte 0 up:
+/// byte k, for k from 1 to 15, becomes 2 (t[k] mod 128) ^ floor(t[k - 1] / 128), and byte 0
+/// becomes 2 (t[0] mod 128) ^ 135 floor(t[15] / 128). When the bit shifted out of byte 15, the
+/// coefficient of x^127, is set, x^128 reduces to x^7 + x^2 + x + 1, and 135 = 0x87 is XORed into
+/// byte 0. The reduction is selected with a mask rather than a branch, since `T` is secret (it is
+/// the tweak encrypted under `Key_2`), as CMAC's doubling does.
 fn mul_alpha(t: &mut Block) {
-    // The carry out of x^127, read before byte 15 is overwritten.
+    // The carry out of x^127, floor(t[15] / 128), read before byte 15 is overwritten.
     let carry = t[BLOCK_LEN - 1] >> 7;
     // From the top byte down, so that byte k - 1 still holds its old value when byte k takes its
-    // top bit. The two operands of `|` have no bit in common, so `|` and `^` agree here.
+    // top bit. On a byte, 2 (t[k] mod 128) is `t[k] << 1`, and floor(t[k - 1] / 128) is
+    // `t[k - 1] >> 7`. The two operands of `|` have no bit in common, so `|` and `^` agree here.
     for k in (1..BLOCK_LEN).rev() {
         t[k] = (t[k] << 1) | (t[k - 1] >> 7);
     }
@@ -393,9 +406,10 @@ fn xor_into(block: &mut Block, mask: &Block) {
     }
 }
 
-/// XTS-AES-blockEnc (`D = Encrypting`) or -blockDec (`D = Decrypting`) of one block in place,
-/// under the mask `t`, which is `T = AES-enc(Key_2, i) ⊗ α^j` for the block's index `j` (step
-/// 1): step 2 XORs `T` in, step 3 runs the cipher under `Key_1`, step 4 XORs `T` in again.
+/// XTS-AES-blockEnc (`D = Encrypting`, IEEE 1619-2007 Sec 5.3.1) or -blockDec (`D = Decrypting`,
+/// Sec 5.4.1) of one block in place, under the mask `t`, which is `T = AES-enc(Key_2, i) ⊗ α^j`
+/// for the block's index `j` (step 1): step 2 XORs `T` in, step 3 runs the cipher under `Key_1`,
+/// step 4 XORs `T` in again.
 fn xex<P, D: CipherStep<P>>(key1: &P, t: &Block, block: &mut Block) {
     xor_into(block, t); // step 2: PP = P ^ T (CC = C ^ T)
     D::one(key1, block); // step 3: CC = AES-enc(Key_1, PP) (PP = AES-dec(Key_1, CC))
@@ -446,7 +460,7 @@ fn xex_blocks<P, D: CipherStep<P>>(key1: &P, t: &mut Block, blocks: &mut [Block]
 }
 
 /// The mask of block 0 of a data unit under the tweak `i`: `T = AES-enc(Key_2, i) ⊗ α^0`, the
-/// tweak encrypted under `Key_2` in both directions.
+/// tweak encrypted under `Key_2` in both directions (step 1 of Sec 5.3.1 and of Sec 5.4.1).
 fn first_mask<P: BlockPermutation<BLOCK_LEN>>(key2: &P, i: &Block) -> Secret<Block> {
     let mut t: Secret<Block> = Secret::new();
     *t = *i;
@@ -454,9 +468,9 @@ fn first_mask<P: BlockPermutation<BLOCK_LEN>>(key2: &P, i: &Block) -> Secret<Blo
     t
 }
 
-/// XTS-AES-Enc of the data unit `data`, in place, under the tweak `i`. `data` is from
-/// [`XTS_MIN_DATA_UNIT_LEN`] to [`XTS_MAX_DATA_UNIT_LEN`] bytes long, which the callers check at
-/// compile time.
+/// XTS-AES-Enc (IEEE 1619-2007 Sec 5.3.2) of the data unit `data`, in place, under the tweak
+/// `i`. `data` is from [`XTS_MIN_DATA_UNIT_LEN`] to [`XTS_MAX_DATA_UNIT_LEN`] bytes long, which
+/// the callers check at compile time.
 fn encrypt<P: BlockPermutation<BLOCK_LEN>>(key1: &P, key2: &P, i: &Block, data: &mut [u8]) {
     let mut t = first_mask(key2, i);
 
@@ -464,17 +478,15 @@ fn encrypt<P: BlockPermutation<BLOCK_LEN>>(key1: &P, key2: &P, i: &Block, data: 
     // them, which is empty when the data unit is a whole number of blocks.
     let (blocks, tail) = data.as_chunks_mut::<BLOCK_LEN>();
 
-    // C_q = XTS-AES-blockEnc(P_q, i, q) for every whole block. Without a partial block that is
-    // the whole data unit; with one, the last of them is the CC that ciphertext stealing takes
-    // apart.
+    // Step 1, and step 3a or 4a for the last whole block: XTS-AES-blockEnc(P_q, i, q) for every
+    // whole block. Without a partial block that is the whole data unit; with one, the last result
+    // is step 4a's CC, which ciphertext stealing takes apart.
     xex_blocks::<P, Encrypting>(key1, &mut t, blocks);
 
-    // Ciphertext stealing, SP 800-38E Sec 5: "Cm is the truncation of a block that is derived
-    // from Pm-1, and Cm-1 is derived from Pm, concatenated with the discarded bits from the
-    // truncation." The last whole block holds CC, P_{m-1} encrypted under index m - 1. Swapping
-    // its first b bytes with the tail leaves C_m = CC[..b] in the tail, in its place after C_{m-1},
-    // and PP = P_m || CC[b..] in the block, which is then encrypted under index m -- the mask now
-    // in `t` -- to C_{m-1}. Every index here depends on the length alone.
+    // Ciphertext stealing, steps 4b to 4e. Swapping CC's first b bytes with the tail puts them,
+    // C_m, in the tail (4b), after C_{m-1} as step 5 orders them, and leaves PP = P_m | CP in the
+    // block, CP being the rest of CC (4c, 4d); PP is then encrypted under index m -- the mask now
+    // in `t` -- to C_{m-1} (4e). Every index here depends on the length alone.
     if !tail.is_empty()
         && let Some(last) = blocks.last_mut()
     {
@@ -483,8 +495,8 @@ fn encrypt<P: BlockPermutation<BLOCK_LEN>>(key1: &P, key2: &P, i: &Block, data: 
     }
 }
 
-/// XTS-AES-Dec of the data unit `data`, in place, under the tweak `i`. The length is as for
-/// [`encrypt`].
+/// XTS-AES-Dec (IEEE 1619-2007 Sec 5.4.2) of the data unit `data`, in place, under the tweak
+/// `i`. The length is as for [`encrypt`].
 fn decrypt<P: BlockPermutation<BLOCK_LEN>>(key1: &P, key2: &P, i: &Block, data: &mut [u8]) {
     let mut t = first_mask(key2, i);
     let (blocks, tail) = data.as_chunks_mut::<BLOCK_LEN>();
@@ -494,21 +506,21 @@ fn decrypt<P: BlockPermutation<BLOCK_LEN>>(key1: &P, key2: &P, i: &Block, data: 
     if !tail.is_empty()
         && let Some((last, head)) = blocks.split_last_mut()
     {
-        // P_q = XTS-AES-blockDec(C_q, i, q) for q < m - 1, leaving the mask of m - 1 in `t`.
+        // Step 1, P_q = XTS-AES-blockDec(C_q, i, q) for q < m - 1, leaves the mask of m - 1 in `t`.
         xex_blocks::<P, Decrypting>(key1, &mut t, head);
 
-        // PP = XTS-AES-blockDec(C_{m-1}, i, m) = P_m || CC[b..], under the mask after `t`'s.
+        // Step 4d: PP = XTS-AES-blockDec(C_{m-1}, i, m) = P_m | CP, under the mask after `t`'s.
         let mut t_m: Secret<Block> = Secret::new();
         *t_m = *t;
         mul_alpha(&mut t_m);
         xex::<P, Decrypting>(key1, &t_m, last);
 
-        // Swapping the first b bytes back puts P_m in the tail and CC = C_m || CC[b..] in the
-        // block, and P_{m-1} = XTS-AES-blockDec(CC, i, m - 1).
+        // Swapping the first b bytes back puts P_m in the tail (4e) and CC = C_m | CP in the
+        // block (4f, 4g), and P_{m-1} = XTS-AES-blockDec(CC, i, m - 1) (4h).
         last[..tail.len()].swap_with_slice(tail);
         xex::<P, Decrypting>(key1, &t, last);
     } else {
-        // P_q = XTS-AES-blockDec(C_q, i, q) for every block.
+        // Steps 1 and 3b: P_q = XTS-AES-blockDec(C_q, i, q) for every block.
         xex_blocks::<P, Decrypting>(key1, &mut t, blocks);
     }
 }

@@ -4,9 +4,10 @@
 //! Every case is a valid encryption of a pseudorandom message of 16 to 136 bytes, which between
 //! them cover each ciphertext-stealing tail length; each is checked in both directions. The file
 //! gives the tweak as an `iv` of 1 to 16 bytes, which is the leading bytes of the 128-bit tweak
-//! with the rest zero: the data unit's sequence number in little-endian, at the width written.
-//! OpenSSL reproduces every case in the file under that reading. The 384-bit-key groups are XTS
-//! over AES-192, which neither IEEE 1619 nor SP 800-38E defines; they are counted and skipped.
+//! with the rest zero: the tweak value's little-endian encoding (IEEE 1619-2007 Sec 5.1) at the
+//! width written, as the standard's Annex C pads a 64-bit sector number. OpenSSL reproduces every
+//! case in the file under that reading. The 384-bit-key groups are XTS over AES-192, which
+//! neither IEEE 1619 nor SP 800-38E defines; they are counted and skipped.
 
 use bouncycastle_aes::hazmat::{AES128Internal, AES256Internal};
 use bouncycastle_cipher::modes::XTSKey;

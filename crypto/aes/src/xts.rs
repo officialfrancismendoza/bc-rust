@@ -13,8 +13,8 @@ use bouncycastle_cipher::modes::XTSKey;
 /// storage. The key is built once with [`FromKeyMaterial`] and encrypts and decrypts one data
 /// unit at a time, in place: [`encrypt_inplace`](XTSKey::encrypt_inplace) and
 /// [`decrypt_inplace`](XTSKey::decrypt_inplace). A data unit is from 16 bytes to 2^20 blocks,
-/// and a length outside that range does not compile. SP 800-38E approves XTS with these two key
-/// sizes only, so there is no XTS-AES-192.
+/// and a length outside that range does not compile. IEEE 1619-2007 Sec 6 defines XTS-AES-128
+/// and XTS-AES-256 only, so there is no XTS-AES-192.
 ///
 /// # Usage Examples
 ///
@@ -39,7 +39,7 @@ use bouncycastle_cipher::modes::XTSKey;
 ///     0xea, 0xfd, 0xbd, 0x33, 0x05, 0x11, 0xba, 0xa1, 0xc9, 0x12, 0xea, 0x24, 0xb7, 0xb1,
 ///     0x30, 0x35, 0x07, 0xab, 0x3a, 0xab, 0xe6, 0x62, 0x1c,
 /// ];
-/// // The tweak is the sequence number as a 128-bit little-endian integer.
+/// // The tweak value, here the sequence number, in little-endian bytes (IEEE 1619-2007 Sec 5.1).
 /// let tweak = 202u128.to_le_bytes();
 ///
 /// let mut data_unit = plaintext;

@@ -104,10 +104,10 @@ fn a_short_key_is_refused() {
 
 // ---- ciphertext stealing -----------------------------------------------------------------------
 
-/// Ciphertext stealing for a data unit of `LEN` = 16m + b bytes, against the encryption of whole
-/// blocks. `ALIGNED` is 16m, and `NEXT` 16(m + 1). SP 800-38E Sec 5: "Cm is the truncation of a
-/// block that is derived from Pm-1, and Cm-1 is derived from Pm, concatenated with the discarded
-/// bits from the truncation."
+/// Ciphertext stealing (IEEE 1619-2007 Sec 5.3.2 step 4) for a data unit of `LEN` = 16m + b
+/// bytes, against the encryption of whole blocks. `ALIGNED` is 16m, and `NEXT` 16(m + 1).
+/// SP 800-38E Sec 5: "Cm is the truncation of a block that is derived from Pm-1, and Cm-1 is
+/// derived from Pm, concatenated with the discarded bits from the truncation."
 fn stealing<const ALIGNED: usize, const LEN: usize, const NEXT: usize>() {
     assert!(ALIGNED.is_multiple_of(16) && ALIGNED < LEN && LEN < NEXT && NEXT == ALIGNED + 16);
     let b = LEN - ALIGNED;

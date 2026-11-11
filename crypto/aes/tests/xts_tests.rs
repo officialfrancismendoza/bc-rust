@@ -1,9 +1,9 @@
 //! XTS-AES through its public API: known answers at the data-unit lengths that matter -- one
 //! block, the ciphertext-stealing edges, a sector and the 2^20-block maximum -- from OpenSSL, an
 //! independent implementation; every block of a data unit against a reference written here from
-//! the definition, which pins the roles of the two key halves, the byte order of the tweak and
-//! the multiplication by α; round trips at every length from one block to eight and a half; and
-//! the key constructor's refusals.
+//! the definition (IEEE 1619-2007 Sec 5.2 and 5.3), which pins the roles of the two key halves,
+//! the byte order of the tweak and the multiplication by α; round trips at every length from one
+//! block to eight and a half; and the key constructor's refusals.
 //!
 //! The published vectors are in `xts_acvp_tests.rs` and `xts_wycheproof.rs`. The compile-time
 //! bounds on the data-unit length are doctests on `bouncycastle_cipher::modes::XTSKey`.
@@ -140,8 +140,9 @@ fn the_longest_data_units_match_openssl() {
 
 // ---- the definition, block by block ------------------------------------------------------------
 
-/// `T ⊗ α` written independently of the implementation: the block as a 128-bit little-endian
-/// integer, shifted left one bit, with x^128 reduced to x^7 + x^2 + x + 1 (0x87).
+/// `T ⊗ α` (IEEE 1619-2007 Sec 5.2) written independently of the implementation: the block as a
+/// 128-bit little-endian integer, shifted left one bit, with x^128 reduced to x^7 + x^2 + x + 1
+/// (0x87).
 fn times_alpha(t: [u8; 16]) -> [u8; 16] {
     let x = u128::from_le_bytes(t);
     let reduction = if x >> 127 == 1 { 0x87 } else { 0 };
@@ -149,8 +150,9 @@ fn times_alpha(t: [u8; 16]) -> [u8; 16] {
 }
 
 /// Every block of an aligned data unit is `C_j = E_K1(P_j ^ T_j) ^ T_j` with
-/// `T_j = E_K2(i) ⊗ α^j`, computed here through the raw permutation from the halves of the key:
-/// the first half encrypts the data, the second the tweak, and the tweak goes in as given.
+/// `T_j = E_K2(i) ⊗ α^j` (IEEE 1619-2007 Sec 5.3.1), computed here through the raw permutation
+/// from the halves of the key: the first half encrypts the data, the second the tweak, and the
+/// tweak goes in as given.
 fn follows_the_definition<P, const HALF: usize, const KEY_LEN: usize>()
 where
     P: KeyExpansion<HALF> + BlockPermutation<16>,

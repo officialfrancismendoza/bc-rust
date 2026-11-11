@@ -6,10 +6,9 @@
 //! them: an XTS key protects data units of one fixed length (NIST SP 800-38E Sec 4), and the
 //! library fixes that length in the key's type, so the command offers the usual sector sizes and
 //! instantiates a key type for the one chosen. The first data unit is processed under `--tweak` and
-//! each later one under the tweak before it plus one, as a 128-bit little-endian integer -- the
-//! consecutive sequence numbers of consecutive sectors, as NIST's ACVP tests number the data units
-//! of a longer payload. Nothing is prepended or appended: the output is exactly as long as the
-//! input.
+//! each later one under the tweak before it plus one, read as a 128-bit little-endian integer: the
+//! numbering and the encoding of IEEE 1619-2007 Sec 5.1. Nothing is prepended or appended: the
+//! output is exactly as long as the input.
 //!
 //! # Warning
 //!
